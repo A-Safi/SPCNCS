@@ -89,7 +89,7 @@ $x_{p}(k+1) = A_p^{d_\tau+1} x_p(k-d_\tau) + \sum_{n=1}^{d_\tau+1} A_p^{d_\tau+1
 
 ### Predicted controller state
 
-$x_c(k+1) = A_c^{d_\tau+1}\,x_c(k-d_\tau) - \sum_{n=1}^{d_\tau+1} A_c^{d_\tau+1-n}\,B_c\,\hat{x}_p\!\left(k-d_\tau+n-1\right) $
+$x_c(k+1) = A_c^{d_\tau+1} x_c(k-d_\tau) - \sum_{n=1}^{d_\tau+1} A_c^{d_\tau+1-n} B_c \hat{x}_p \left(k-d_\tau+n-1\right) $
 
 ### Control signal
 

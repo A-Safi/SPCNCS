@@ -11,7 +11,7 @@ The project implements a **dynamic predictive control** scheme for **networked c
 
 The controller is based on an **LQTI (Linear Quadratic Tracker with Integrator)** structure and extends classical networked predictive control by predicting **both**:
 1) the plant state evolution, and  
-2) the controller internal dynamics (integrator state),  
+2) the controller internal dynamics,  
 to maintain stable regulation and tracking under delay and packet loss.
 
 ---
@@ -24,9 +24,9 @@ Typical files used by the simulation include:
   - plant/controller discretization
   - predictive estimation logic under delay/dropout
   - simulation and plotting
-- `StateSpace.mat` (plant matrices; must include at least `A` and `B`)
-- `Inverted_Pendulum.m` (nonlinear pendulum dynamics used by the integrator)
-- `RungeKutta.m` (Runge–Kutta integration routine)
+- `StateSpace.mat` (plant matrices)
+- `Inverted_Pendulum.m` (nonlinear pendulum dynamics)
+- `RungeKutta.m` (Runge–Kutta Solver)
 
 If your repository uses different filenames, update the references above accordingly.
 
@@ -85,31 +85,19 @@ Let $d_\tau$ denote the effective number of consecutive delayed/missing samples 
 
 ### Predicted plant state
 
-$\hat{x}_p(k + 1) = A_p^{d_\tau + 1} x_p(k - d_\tau)
-+ \sum_{n=1}^{d_\tau + 1} A_p^{d_\tau + 1 - n} B_p\, u_p(k - d_\tau + n - 1)$
+$\hat{x}_p(k + 1) = A_p^{d_\tau + 1} x_p(k - d_\tau)$
+$+ \sum_{n=1}^{d_\tau + 1} A_p^{d_\tau + 1 - n} B_p\, u_p(k - d_\tau + n - 1)$
 
 ### Predicted controller state
 
-$x_c(k + 1) = A_c^{d_\tau + 1} x_c(k - d_\tau)
-- \sum_{n=1}^{d_\tau + 1} A_c^{d_\tau + 1 - n} B_c\, \hat{x}_p(k - d_\tau + n - 1)
+$x_c(k + 1) = A_c^{d_\tau + 1} x_c(k - d_\tau)$
+$- \sum_{n=1}^{d_\tau + 1} A_c^{d_\tau + 1 - n} B_c\, \hat{x}_p(k - d_\tau + n - 1)
 $
 
 ### Control signal
 
 $u_p(k + 1) = C_c x_c(k + 1) - D_c \hat{x}_p(k + 1)$
 
----
-
-## Requirements
-
-- MATLAB (Control System Toolbox recommended)
-- `StateSpace.mat` available in the working directory
-
-Optional (for stability LMIs discussed in the paper):
-- YALMIP
-- SDP solver (e.g., SDPT3)
-
----
 
 ## Quick start
 
@@ -126,23 +114,6 @@ $M = 1,2,3,4$
 and generate:
 - dropout + delay profile plots for each $M$
 - response comparison plots (predictive vs. baseline)
----
-
-## Math rendering on GitHub
-
-GitHub’s default README renderer may not display `$$ ... $$` math blocks.
-If you want math to render correctly on GitHub, publish a small GitHub Pages site using MathJax/KaTeX (e.g., `docs/` + Jekyll) and place this README content there, or provide an additional rendered PDF.
-
----
-
-## Citation
-
-If you use this code in academic work, please cite the associated paper:
-
-Ali Safi, Mostafa Nasiri, Reza Farasat,  
-**The design of dynamic predictive control for networked control systems subject to latency and packet loss.**
-
----
 
 ## License
 

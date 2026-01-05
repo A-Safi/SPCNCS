@@ -87,7 +87,7 @@ Let $d_𝜏$ denote the effective number of consecutive delayed/missing samples 
 
 $\hat{x}_{p}(k+1) = A_p^{d_𝜏+1} x_p(k-d_𝜏) + $
 
-$\tab\sum_{n=1}^{d_𝜏+1} A_p^{d_𝜏+1-n} B_p u_p \left(k-d_𝜏+n-1\right)$
+$\qquad\sum_{n=1}^{d_𝜏+1} A_p^{d_𝜏+1-n} B_p u_p \left(k-d_𝜏+n-1\right)$
 
 ### Predicted controller state
 

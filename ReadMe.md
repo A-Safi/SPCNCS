@@ -81,17 +81,15 @@ $M \in \{1,2,3,4\}$
 
 ## Prediction logic (core equations)
 
-Let $d_\tau$ denote the effective number of consecutive delayed/missing samples used by the predictor.
+Let $d_𝜏$ denote the effective number of consecutive delayed/missing samples used by the predictor.
 
 ### Predicted plant state
 
-$\hat{x}_p(k+1) = A_p^{d_𝜏+1} x_p(k-d_𝜏)$
-
-$x_{p}(k+1) = A_p^{d_\tau+1} x_p(k-d_\tau) + \sum_{n=1}^{d_\tau+1} A_p^{d_\tau+1-n} B_p u_p \left(k-d_\tau+n-1\right)$
+$\hat{x}_{p}(k+1) = A_p^{d_𝜏+1} x_p(k-d_𝜏) + \sum_{n=1}^{d_𝜏+1} A_p^{d_𝜏+1-n} B_p u_p \left(k-d_𝜏+n-1\right)$
 
 ### Predicted controller state
 
-$x_c(k+1) = A_c^{d_\tau+1} x_c(k-d_\tau) - \sum_{n=1}^{d_\tau+1} A_c^{d_\tau+1-n} B_c \hat{x}_p \left(k-d_\tau+n-1\right)$
+$x_c(k+1) = A_c^{d_𝜏+1} x_c(k-d_𝜏) - \sum_{n=1}^{d_𝜏+1} A_c^{d_𝜏+1-n} B_c \hat{x}_p \left(k-d_𝜏+n-1\right)$
 
 ### Control signal
 

@@ -85,13 +85,11 @@ Let $d_\tau$ denote the effective number of consecutive delayed/missing samples 
 
 ### Predicted plant state
 
-$\hat{x}_p(k + 1) = A_p^{d_\tau + 1} x_p(k - d_\tau)
-+ \sum_{n=1}^{d_\tau + 1} A_p^{d_\tau + 1 - n} B_p\, u_p(k - d_\tau + n - 1)$
+$\hat{x}_p(k + 1) = A_p^{d_\tau + 1} x_p(k - d_\tau)+ \sum_{n=1}^{d_\tau + 1} A_p^{d_\tau + 1 - n} B_p\, u_p(k - d_\tau + n - 1)$
 
 ### Predicted controller state
 
-$x_c(k + 1) = A_c^{d_\tau + 1} x_c(k - d_\tau)
-- \sum_{n=1}^{d_\tau + 1} A_c^{d_\tau + 1 - n} B_c\, \hat{x}_p(k - d_\tau + n - 1)
+$x_c(k + 1) = A_c^{d_\tau + 1} x_c(k - d_\tau)- \sum_{n=1}^{d_\tau + 1} A_c^{d_\tau + 1 - n} B_c\, \hat{x}_p(k - d_\tau + n - 1)
 $
 
 ### Control signal

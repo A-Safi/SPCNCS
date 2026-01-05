@@ -201,7 +201,7 @@ function plotDropoutAndDelay(res)
 
     subplot(2,1,1)
     bar(res.t, res.g, 'BarWidth', 1)
-    xlabel(sprintf('(a) Packet loss (p = %.0f%%)', res.dropProb*100), 'FontSize', 12, 'FontName', 'Times')
+    xlabel(sprintf('(a) Packet loss (%.0f%%)', res.dropProb*100), 'FontSize', 12, 'FontName', 'Times')
     ylabel('Received (1) / Dropped (0)', 'FontName', 'Times')
     title(res.TitleFig, 'FontSize', 12, 'FontName', 'Times')
 

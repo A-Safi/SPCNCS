@@ -1,247 +1,211 @@
 clc; clear; close all
 
-M_values = 1:4;
+% Sweep parameter (affects delay statistics + dropout probability)
+M_values = 3;
 
-cfg = struct();
-cfg.T        = 0.01;
-cfg.SimTime  = 3.0;
-cfg.buff     = 20;
-cfg.x0       = [0; 0; 0.04; 0];
-cfg.C1       = [1 0 0 0]; % For controller design with no presistance error on cart angel (LQTI)
-cfg.Qaug     = diag([5 0.5 50 5 0.05]);
-cfg.Raug     = 100;
-cfg.dsInput  = 2;
-cfg.noiseAmp = [0.005; 0; 0.005; 0];
+% -------------------- Config --------------------
+T        = 0.01;                 % sample time (s)
+SimTime  = 3.0;                  % simulation horizon (s)
+buff     = 20;                   % buffer length (samples)
+x0       = [0; 0; 0.04; 0];      % initial state
 
-plant = loadPlantAndController(cfg);
+CI       = [1 0 0 0];            % tracked output y = CI*x
+Qaug     = diag([6 0.5 50 5 0.05]); % augmented Q = blkdiag(Qx,Qi)
+Raug     = 80;                  % input weight
+dsInput  = 2;                    % input delay index offset in network branch
 
+noiseAmp = 0*[0.005; 0; 0.005; 0]; % same shape as state (used in RK input)
+
+% -------------------- Load continuous model, convert to discrete model --------------------
+S = load('StateSpace.mat');      % expects A, B (continuous-time)
+A = S.A;
+B = S.B;
+
+n = size(A,1);
+m = size(B,2);
+
+% Discrete model (used ONLY for observer/prediction/controller)
+sysc = ss(A, B, eye(n), zeros(n,m));
+sysd = c2d(sysc, T, 'zoh');
+
+A = sysd.A;                % Ad
+B = sysd.B;                % Bd
+C = eye(n);
+D = zeros(n,m);
+
+% -------------------- Discrete LQTI design (purely discrete) --------------------
+% Integrator: xi[k+1] = xi[k] + T*(r[k] - CI*x[k])
+Aa = [A        zeros(n,1);
+     -T*CI           1          ];   % (n+1)x(n+1)
+
+Ba = [B;
+      zeros(1,m)];                   % (n+1)xm
+
+Qa = Qaug;
+R  = Raug * eye(m);
+
+K  = dlqr(Aa, Ba, Qa, R);            % K = [Kx Ki]
+Kx = K(:,1:n);                       % mxn
+Ki = K(:,n+1);                       % mx1
+
+% -------------------- Discrete dynamic LQTI controller in your structure --------------------
+Ac = 1;                         % scalar integrator state
+Bc = T * CI;                    % 1xn, so -Bc*e = -T*CI*xHat
+Cc = -Ki;                       % mx1
+Dc = Kx;                        % mxn, since u = Cc*xi - Dc*xHat
+
+% Observer gain (kept as your original)
+Kobs = eye(n);
+
+% -------------------- Run cases --------------------
 for M = M_values
-    res = runOneCase(M, plant, cfg);
-    plotDropoutAndDelay(res);
-    plotResponses(res, cfg);
-end
 
-%% ---------- Local functions ----------
+    StepNum = round(SimTime / T);
+    t       = (0:StepNum)' * T;
 
-function plant = loadPlantAndController(cfg)
-    % Load continuous-time model and build discrete-time plant + discrete controller.
+    no = n;
+    nc = 1;                           % LQTI controller state is scalar (xi)
 
-    s = load('StateSpace.mat');  % expected to contain at least A and B
-    A = s.A;
-    B = s.B;
+    % Delay (samples): avg M plus random in [0, M]
+    delayRand = floor((M+1) * rand(size(t)));
+    delay     = M + delayRand;
+    maxDelay  = max(delay);
 
-    n   = size(A,1);
-    C   = eye(n);
-    D   = zeros(n,1);
+    % Dropouts: received (1) or dropped (0)
+    dropProb = M/10;
+    g        = sign(floor((1/dropProb) * rand(size(t)))); % 1 or 0
 
-    % Build augmented continuous-time model used only for LQR design.
-    A1 = [A            zeros(n,1);
-          -cfg.C1      0         ];
-    B1 = [B; 0];
+    % Noise injected into RK state argument (same as your original logic)
+    noise = noiseAmp .* rand(n, numel(t))-noiseAmp/2;            % set "* 0" to enable/disable
 
-    % Continuous-time LQR on the augmented model.
-    K1 = lqr(A1, B1, cfg.Qaug, cfg.Raug);
+    % Delayed measurement buffers
+    yIdealBuf = zeros(no, StepNum+1+maxDelay+1);
+    yRecvBuf  = zeros(no, StepNum+1+maxDelay+1);
 
-    % Discretize original plant for observer/prediction calculations.
-    sys  = ss(A, B, C, D);
-    sysd = c2d(sys, cfg.T);
+    % Plant states (continuous plant via RK)
+    xIdeal = zeros(n, StepNum+1);
+    xNet   = zeros(n, StepNum+1);
+    yNet   = zeros(no, StepNum+1);
 
-    Ad = sysd.A;
-    Bd = sysd.B;
-    Cd = sysd.C;
-    Dd = sysd.D;
+    % State estimates
+    xHatIdeal = zeros(n, StepNum+1);
+    xHatNet   = zeros(n, StepNum + buff + 1);
 
-    % Build a simple dynamic compensator (continuous), then discretize.
-    Ac = 0;
-    Bc = cfg.C1;
-    Cc = -K1(n+1);
-    Dc = K1(1:n);
+    % Inputs (buffered indexing preserved)
+    uIdeal = zeros(m, StepNum + buff + 1);
+    uNet   = zeros(m, StepNum + buff + 1);
 
-    ctrl  = ss(Ac, Bc, Cc, Dc);
-    ctrld = c2d(ctrl, cfg.T);
-
-    plant = struct();
-    plant.A  = Ad;
-    plant.B  = Bd;
-    plant.C  = Cd;
-    plant.D  = Dd;
-
-    plant.Ac = ctrld.A;
-    plant.Bc = ctrld.B;
-    plant.Cc = ctrld.C;
-    plant.Dc = ctrld.D;
-
-    % Simple “observer gain” used in the original script (identity mapping).
-    plant.Kobs = eye(n);
-end
-
-function res = runOneCase(M, plant, cfg)
-    % Run a single simulation instance for a given M (delay/dropout parameter).
-
-    T        = cfg.T;
-    SimTime  = cfg.SimTime;
-    StepNum  = round(SimTime / T);
-    t        = (0:StepNum)' * T;
-
-    n   = size(plant.A,1);
-    no  = size(plant.C,1);
-    m   = size(plant.B,2);
-    nc  = size(plant.Ac,1);
-
-    % Generate packet delay and dropout sequences.
-    avgDelay     = M;
-    delayRand    = floor((M+1) * rand(size(t)));
-    delay        = avgDelay + delayRand;
-    maxDelay     = max(delay);
-
-    dropProb     = M/10;
-    g            = sign(floor((1/dropProb) * rand(size(t))));
-
-    % Measurement noise (set amplitude via cfg.noiseAmp; keep scale explicit).
-    noise = (cfg.noiseAmp .* rand(no, numel(t))) * 0;
-
-    % Preallocate histories (ensure delayed-index writes remain in-bounds).
-    yIdeal = zeros(no, StepNum+1+maxDelay+1);
-    yRecv  = zeros(no, StepNum+1+maxDelay+1);
-
-    xIdeal     = zeros(n, StepNum+1);
-    xNet       = zeros(n, StepNum+1);
-    yNet       = zeros(no, StepNum+1);
-
-    xHatIdeal  = zeros(n, StepNum+1);
-
-    uIdeal     = zeros(m, StepNum + cfg.buff + 1);
-    uNet       = zeros(m, StepNum + cfg.buff + 1);
-
-    xHatNet    = zeros(n, StepNum + cfg.buff + 1);
+    % Controller states (xi)
     xCtrlIdeal = zeros(nc, StepNum+1);
-    xCtrlNet   = zeros(nc, StepNum + cfg.buff + 1);
+    xCtrlNet   = zeros(nc, StepNum + buff + 1);
 
-    % Initial conditions.
-    xIdeal(:,1) = cfg.x0;
-    xNet(:,1)   = cfg.x0;
+    % Initial conditions
+    xIdeal(:,1) = x0;
+    xNet(:,1)   = x0;
 
-    yIdeal(:,1) = plant.C * cfg.x0;
-    yNet(:,1)   = plant.C * cfg.x0;
+    yIdealBuf(:,1) = C * x0;
+    yNet(:,1)      = C * x0;
 
-    % Predictor bookkeeping (number of consecutive missing samples).
     missCount = 0;
 
-    % Reference signals (kept in vector form to match original algebra).
-    rIdeal = 0 * [pi/4; 0; 0; 0];
-    rNet   = [pi/4; 0; 0; 0];
-
+    % -------------------- Main simulation loop --------------------
     for k = 1:StepNum
-        % ----- Baseline branch: no dropout/prediction logic -----
-        xIdeal(:,k+1) = RungeKutta(@Inverted_Pendulum, xIdeal(:,k) + noise(:,k), T, uIdeal(:,k+cfg.buff-2));
-        yIdeal(:,k+1+delay(k)) = plant.C * xIdeal(:,k+1);
 
-        xHatIdeal(:,k+1) = plant.Kobs * yIdeal(:,k+1) + (plant.A - plant.Kobs*plant.C) * xHatIdeal(:,k) + plant.B * uIdeal(:,k+cfg.buff);
+        % ========= Baseline plant (continuous via RK) =========
+        xIdeal(:,k+1) = RungeKutta(@Inverted_Pendulum, ...
+            xIdeal(:,k) + noise(:,k), T, uIdeal(:,k+buff-2));
 
-        eIdeal = xHatIdeal(1,k+1) - rIdeal;
-        xCtrlIdeal(:,k+1) = plant.Ac * xCtrlIdeal(:,k) - plant.Bc * eIdeal;
-        uIdeal(:,k+cfg.buff+1) = plant.Cc * xCtrlIdeal(:,k+1) - plant.Dc * xHatIdeal(:,k+1);
+        % Write measurement into delayed buffer
+        yIdealBuf(:,k+1+delay(k)) = C * xIdeal(:,k+1);
 
-        % ----- Networked branch: dropout + delayed measurement + prediction -----
-        xNet(:,k+1) = RungeKutta(@Inverted_Pendulum, xNet(:,k) + noise(:,k), T, uNet(:,k+cfg.buff-cfg.dsInput));
-        yNet(:,k+1) = plant.C * xNet(:,k+1);
+        % Discrete observer (uses Ad,Bd)
+        xHatIdeal(:,k+1) = Kobs * yIdealBuf(:,k+1) + ...
+            (A - Kobs*C) * xHatIdeal(:,k) + ...
+             B * uIdeal(:,k+buff);
 
-        yRecv(:,k+1+delay(k)) = g(k) * yNet(:,k+1);
+        % Discrete LQTI controller (dynamic)
+        xCtrlIdeal(:,k+1) = Ac * xCtrlIdeal(:,k) - Bc * xHatIdeal(:,k+1);
+        uIdeal(:,k+buff+1) = Cc * xCtrlIdeal(:,k+1) - Dc * xHatIdeal(:,k+1);
 
-        % Decide whether a new packet is available at time k+1.
-        if all(yRecv(:,k+1) == 0)
-            yRecv(:,k+1) = yRecv(:,k);
+        % ========= Networked plant (continuous via RK) =========
+        xNet(:,k+1) = RungeKutta(@Inverted_Pendulum, ...
+            xNet(:,k) + noise(:,k), T, uNet(:,k+buff-dsInput));
+
+        yNet(:,k+1) = C * xNet(:,k+1);
+
+        % Apply dropout then delay
+        yRecvBuf(:,k+1+delay(k)) = g(k) * yNet(:,k+1);
+
+        % If nothing arrives now, hold last received packet
+        if all(yRecvBuf(:,k+1) == 0)
+            yRecvBuf(:,k+1) = yRecvBuf(:,k);
             missCount = missCount + 1;
         else
             missCount = delay(k);
         end
 
-        % Keep prediction horizon within available input/state history.
-        missCount = min(missCount, cfg.buff-1);
+        missCount = min(missCount, buff-1);
 
-        % State prediction using last received measurement and past inputs.
+        % Plant state prediction (discrete model)
         sigmaX = zeros(n,1);
         for j = 1:(missCount+1)
-            sigmaX = sigmaX + plant.A^(j-1) * plant.B * uNet(:,k+cfg.buff-j+1);
+            sigmaX = sigmaX + A^(j-1) * B * uNet(:,k+buff-j+1);
         end
-        xHatNet(:,k+cfg.buff+1) = plant.A^(missCount+1) * plant.Kobs * yRecv(:,k+1) + sigmaX;
+        xHatNet(:,k+buff+1) = A^(missCount+1) * Kobs * yRecvBuf(:,k+1) + sigmaX;
 
-        % Controller-state prediction driven by predicted state history.
-        eNet = xHatNet(1,k+cfg.buff+1) - rNet;
-
+        % Controller state prediction (discrete controller)
         sigmaC = zeros(nc,1);
         for j = 1:(missCount+1)
-            sigmaC = sigmaC + plant.Ac^(j-1) * plant.Bc * xHatNet(:,k+cfg.buff-j+1);
+            sigmaC = sigmaC + Ac^(j-1) * Bc * (xHatNet(:,k+buff-j+1));
         end
-        xCtrlNet(:,k+cfg.buff+1) = plant.Ac^(missCount+1) * xCtrlNet(:,k+cfg.buff-missCount) - sigmaC;
+        xCtrlNet(:,k+buff+1) = Ac^(missCount+1) * xCtrlNet(:,k+buff-missCount) - sigmaC;
 
-        % Control law using predicted plant state and controller state.
-        uNet(:,k+cfg.buff+1) = plant.Cc * xCtrlNet(:,k+cfg.buff+1) - plant.Dc * xHatNet(:,k+cfg.buff+1);
+        % Networked control law
+        uNet(:,k+buff+1) = Cc * xCtrlNet(:,k+buff+1) - Dc * xHatNet(:,k+buff+1);
     end
 
-    res = struct();
-    res.M          = M;
-    res.t          = t;
-    res.delay      = delay;
-    res.g          = g;
-    res.dropProb   = dropProb;
+    % -------------------- Plots: dropouts + delay --------------------
+    TitleFig = sprintf('M = %d', M);
 
-    res.xIdeal     = xIdeal;
-    res.xNet       = xNet;
-    res.uIdeal     = uIdeal;
-    res.uNet       = uNet;
-
-    res.TitleFig   = sprintf('M = %d', M);
-end
-
-function plotDropoutAndDelay(res)
-    % Visualize packet reception (g) and measurement delay (samples).
-
-    figure(10 + res.M); clf
-
+    figure(10 + M); clf
     subplot(2,1,1)
-    bar(res.t, res.g, 'BarWidth', 1)
-    xlabel(sprintf('(a) Packet loss (%.0f%%)', res.dropProb*100), 'FontSize', 12, 'FontName', 'Times')
+    bar(t, g, 'BarWidth', 1)
+    xlabel(sprintf('(a) Packet loss (%.0f%%)', dropProb*100), 'FontSize', 12, 'FontName', 'Times')
     ylabel('Received (1) / Dropped (0)', 'FontName', 'Times')
-    title(res.TitleFig, 'FontSize', 12, 'FontName', 'Times')
+    title(TitleFig, 'FontSize', 12, 'FontName', 'Times')
 
     subplot(2,1,2)
-    bar(res.t, res.delay, 'BarWidth', 1)
-    ylim([0, max(res.delay)+1])
+    bar(t, delay, 'BarWidth', 1)
+    ylim([0, max(delay)+1])
     xlabel('(b) Measurement latency', 'FontSize', 12, 'FontName', 'Times')
     ylabel('Delay (samples)', 'FontName', 'Times')
-end
 
-function plotResponses(res, cfg)
-    % Compare baseline vs. networked-prediction closed-loop responses.
-
-    t = res.t;
-
-    figure(100 + res.M); clf
+    % -------------------- Plots: responses --------------------
+    figure(100 + M); clf
 
     subplot(3,1,1)
-    plot(t, res.xIdeal(3,:), 'r--', 'LineWidth', 1.2); hold on; grid on
-    plot(t, res.xNet(3,:),   'b-',  'LineWidth', 1.2)
-    title(res.TitleFig, 'FontSize', 12, 'FontName', 'Times')
-    bnd = max(abs(res.xNet(3,:))); if bnd == 0, bnd = 1; end
-    ylim([-1.1*bnd 1.1*bnd]); xlim([0 cfg.SimTime])
+    plot(t, xIdeal(3,:), 'r--', 'LineWidth', 1.2); hold on; grid on
+    plot(t, xNet(3,:),   'b-',  'LineWidth', 1.2)
+    title(TitleFig, 'FontSize', 12, 'FontName', 'Times')
+    bnd = max(abs(xNet(3,:))); if bnd == 0, bnd = 1; end
+    ylim([-1.1*bnd 1.1*bnd]); xlim([0 SimTime])
     ylabel('\alpha (rad)', 'FontSize', 12, 'FontName', 'Times')
 
     subplot(3,1,2)
-    plot(t, res.xIdeal(1,:), 'r--', 'LineWidth', 1.2); hold on; grid on
-    plot(t, res.xNet(1,:),   'b-',  'LineWidth', 1.2)
-    bnd = max(abs(res.xNet(1,:))); if bnd == 0, bnd = 1; end
-    ylim([-1.1*bnd 1.1*bnd]); xlim([0 cfg.SimTime])
+    plot(t, xIdeal(1,:), 'r--', 'LineWidth', 1.2); hold on; grid on
+    plot(t, xNet(1,:),   'b-',  'LineWidth', 1.2)
+    bnd = max(abs(xNet(1,:))); if bnd == 0, bnd = 1; end
+    ylim([-1.1*bnd 1.1*bnd]); xlim([0 SimTime])
     ylabel('\theta (rad)', 'FontSize', 12, 'FontName', 'Times')
 
     subplot(3,1,3)
-    plot(t, res.uIdeal(cfg.buff+1:end), 'r--', 'LineWidth', 1.2); hold on; grid on
-    plot(t, res.uNet(cfg.buff+1:end),   'b-',  'LineWidth', 1.2)
-    bnd = max(abs(res.uNet(:))); if bnd == 0, bnd = 1; end
-    ylim([-1.1*bnd 1.1*bnd]); xlim([0 cfg.SimTime])
+    plot(t, uIdeal(buff+1:end), 'r--', 'LineWidth', 1.2); hold on; grid on
+    plot(t, uNet(buff+1:end),   'b-',  'LineWidth', 1.2)
+    bnd = max(abs(uNet(:))); if bnd == 0, bnd = 1; end
+    ylim([-1.1*bnd 1.1*bnd]); xlim([0 SimTime])
     ylabel('Torque (N·m)', 'FontSize', 12, 'FontName', 'Times')
     xlabel('Time (s)', 'FontSize', 12, 'FontName', 'Times')
-    legend('Baseline (no dropout/prediction logic)', ...
+    legend('Baseline (no dropout/prediction)', ...
            'Networked (prediction + dropout)', ...
            'Location', 'southeast', 'FontSize', 12, 'FontName', 'Times')
 end

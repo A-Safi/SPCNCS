@@ -4,7 +4,7 @@ clc; clear; close all
 M_values = 3;
 
 % -------------------- Config --------------------
-T        = 0.01;                 % sample time (s)
+Ts        = 0.01;                 % sample time (s)
 SimTime  = 3.0;                  % simulation horizon (s)
 buff     = 20;                   % buffer length (samples)
 x0       = [0; 0; 0.04; 0];      % initial state
@@ -26,7 +26,7 @@ m = size(B,2);
 
 % Discrete model (used ONLY for observer/prediction/controller)
 sysc = ss(A, B, eye(n), zeros(n,m));
-sysd = c2d(sysc, T, 'zoh');
+sysd = c2d(sysc, Ts, 'zoh');
 
 A = sysd.A;                % Ad
 B = sysd.B;                % Bd
@@ -34,9 +34,9 @@ C = eye(n);
 D = zeros(n,m);
 
 % -------------------- Discrete LQTI design (purely discrete) --------------------
-% Integrator: xi[k+1] = xi[k] + T*(r[k] - CI*x[k])
+% Integrator: xi[k+1] = xi[k] + Ts*(r[k] - CI*x[k])
 Aa = [A        zeros(n,1);
-     -T*CI           1          ];   % (n+1)x(n+1)
+     -Ts*CI           1          ];   % (n+1)x(n+1)
 
 Ba = [B;
       zeros(1,m)];                   % (n+1)xm
@@ -50,7 +50,7 @@ Ki = K(:,n+1);                       % mx1
 
 % -------------------- Discrete dynamic LQTI controller in your structure --------------------
 Ac = 1;                         % scalar integrator state
-Bc = T * CI;                    % 1xn, so -Bc*e = -T*CI*xHat
+Bc = Ts * CI;                    % 1xn, so -Bc*e = -Ts*CI*xHat
 Cc = -Ki;                       % mx1
 Dc = Kx;                        % mxn, since u = Cc*xi - Dc*xHat
 
@@ -60,8 +60,8 @@ Kobs = eye(n);
 % -------------------- Run cases --------------------
 for M = M_values
 
-    StepNum = round(SimTime / T);
-    t       = (0:StepNum)' * T;
+    StepNum = round(SimTime / Ts);
+    t       = (0:StepNum)' * Ts;
 
     no = n;
     nc = 1;                           % LQTI controller state is scalar (xi)
@@ -113,7 +113,7 @@ for M = M_values
 
         % ========= Baseline plant (continuous via RK) =========
         xIdeal(:,k+1) = RungeKutta(@Inverted_Pendulum, ...
-            xIdeal(:,k) + noise(:,k), T, uIdeal(:,k+buff-2));
+            xIdeal(:,k) + noise(:,k), Ts, uIdeal(:,k+buff-2));
 
         % Write measurement into delayed buffer
         yIdealBuf(:,k+1+delay(k)) = C * xIdeal(:,k+1);
@@ -129,7 +129,7 @@ for M = M_values
 
         % ========= Networked plant (continuous via RK) =========
         xNet(:,k+1) = RungeKutta(@Inverted_Pendulum, ...
-            xNet(:,k) + noise(:,k), T, uNet(:,k+buff-dsInput));
+            xNet(:,k) + noise(:,k), Ts, uNet(:,k+buff-dsInput));
 
         yNet(:,k+1) = C * xNet(:,k+1);
 

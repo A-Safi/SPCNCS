@@ -12,7 +12,9 @@ The project implements a **dynamic predictive control** scheme for **networked c
 The controller is based on an **LQTI (Linear Quadratic Tracker with Integrator)** structure and extends classical networked predictive control by predicting **both**:
 1) the plant state evolution, and  
 2) the controller internal dynamics,  
-to maintain stable regulation and tracking under delay and packet loss.
+to maintain stable regulation under delay and packet loss.
+
+Note that for the LQTI controller without prediction, the packet-dropout rate is set to 0% and only network delay is considered, because when a packet is lost the control input cannot be updated and the closed-loop system becomes unstable under any nonzero packet loss. In contrast, the predictive controller is evaluated under both random delay and packet dropout, since it can maintain operation by using predicted signals when packets are delayed or lost.
 
 ---
 
@@ -51,13 +53,9 @@ $x_c(k + 1) = A_c x_c(k) + B_c u_c(k)$
 
 $y_c(k) = C_c x_c(k) + D_c u_c(k)$
 
-The formulation used in the paper applies the following assumptions:
+The formulation used in the paper applies the following relations:
 
-$y_{ref} = 0$
-
-$u_p(k) = y_c(k)$
-
-$u_c(k) = -\hat{x}_p(k)$
+$y_{ref} = 0, \quad u_p(k) = y_c(k), \quad u_c(k) = -\hat{x}_p(k)$
 
 ---
 
@@ -115,7 +113,3 @@ $M = 1,2,3,4$
 and generate:
 - dropout + delay profile plots for each $M$
 - response comparison plots (predictive vs. baseline)
-
-## License
-
-This project is licensed under the MIT License. See [`LICENSE`](LICENSE).
